@@ -1,0 +1,12 @@
+{
+  "name": "space-dogs-5v5-server",
+  "version": "1.0.0",
+  "description": "Online 5v5 multiplayer + AI server for Space Dogs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
