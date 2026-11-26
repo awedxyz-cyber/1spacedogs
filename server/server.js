@@ -166,6 +166,7 @@ class Room {
     this.id = id;
     this.clients = new Map();
     this.events = [];
+    this.overT = 0;
     this.resetWorld(minutes);
   }
 
@@ -195,6 +196,7 @@ class Room {
   }
 
   resetWorld(minutes = 3) {
+    this.overT = 0;
     const baseDur = clamp(Number(minutes) || 3, 1, 8) * 60;
     const star = { x: rand(-350, 350), y: rand(-350, 350), radius: rand(95, 135), color: ["#ffd43b", "#ffa94d", "#74c0fc", "#ff8787"][randInt(0, 3)] };
     const planets = [];
@@ -257,7 +259,6 @@ class Room {
   }
 
   assignPlayer(client) {
-    // Először keressünk szabad vagy AI által irányított hajót a kért/kevesebb játékosú csapatban
     const blueHumans = this.state.ships.filter(s => s.team === "blue" && s.isHuman).length;
     const redHumans = this.state.ships.filter(s => s.team === "red" && s.isHuman).length;
     const preferredTeam = (client.preferredTeam === "red" || client.preferredTeam === "blue")
@@ -323,7 +324,7 @@ class Room {
   }
 
   handleAction(client, msg) {
-    const ship = this.state.ships.find(s => s.id === client.shipId);
+    const ship = this.state.ships.find(s => s.id === client.shipId && s.controllerClientId === client.id);
     if (!ship || this.state.gameOver) return;
 
     if (msg.type === "input" && msg.input) {
@@ -597,7 +598,6 @@ class Room {
       }
     }
 
-    // Bázisok és drónok
     for (const team of ["blue", "red"]) {
       const b = st.bases[team], opp = team === "blue" ? "red" : "blue";
       b.underAttackTimer = Math.max(0, b.underAttackTimer - dt);
@@ -645,7 +645,6 @@ class Room {
       }
     }
 
-    // Kraken
     if (!st.kraken) {
       st.krakenSpawnCd -= dt;
       if (st.krakenSpawnCd <= 0) {
@@ -670,7 +669,6 @@ class Room {
       k.y = clamp(k.y + k.vy * dt, -HALF + 60, HALF - 60);
     }
 
-    // Hajók (emberi + AI)
     for (const s of st.ships) {
       s.w1Cd = Math.max(0, s.w1Cd - dt);
       s.w2Cd = Math.max(0, s.w2Cd - dt);
@@ -742,7 +740,6 @@ class Room {
         }
       }
 
-      // Automatikus közeli bányászat
       const nearNode = st.nodes.find(n => n.respawnTimer <= 0 && dist(s, n) < s.miningRange);
       if (nearNode && st.beams.length < 160) {
         st.beams.push({ x1: s.x, y1: s.y, x2: nearNode.x, y2: nearNode.y, color: "#74c0fc", life: 0.06 });
@@ -756,7 +753,6 @@ class Room {
       s.x = clamp(s.x + s.vx * dt, -HALF + 30, HALF - 30);
       s.y = clamp(s.y + s.vy * dt, -HALF + 30, HALF - 30);
 
-      // Regeneráció és bázis kiszolgálás
       const ownB = st.bases[s.team];
       if (dist(s, ownB) < ownB.radius + 130) {
         if (s.baseDepositCd <= 0 && s.cargo >= 5) {
@@ -843,7 +839,7 @@ class Room {
     for (let i = st.beams.length - 1; i >= 0; i--) { st.beams[i].life -= dt; if (st.beams[i].life <= 0) st.beams.splice(i, 1); }
   }
 
-  snapshot(withShape = true) {
+  snapshot() {
     const st = this.state;
     const events = this.events.splice(0, this.events.length);
     return {
@@ -854,7 +850,7 @@ class Room {
       turrets: st.turrets,
       nodes: st.nodes.map(n => ({
         id: n.id, type: n.type, x: n.x, y: n.y, vx: n.vx, vy: n.vy,
-        radius: n.radius, rot: n.rot, shape: withShape ? n.shape : undefined, hp: n.hp, maxHp: n.maxHp, respawnTimer: n.respawnTimer
+        radius: n.radius, rot: n.rot, shape: n.shape, hp: n.hp, maxHp: n.maxHp, respawnTimer: n.respawnTimer
       })),
       ships: st.ships.map(s => ({
         id: s.id, team: s.team, shipClass: s.shipClass, isHuman: s.isHuman,
@@ -913,7 +909,7 @@ wss.on("connection", (ws) => {
       const msg = JSON.parse(String(raw));
       if (!msg || typeof msg.type !== "string") return;
       if (msg.type === "ping") {
-        ws.send(JSON.stringify({ type: "pong" }));
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "pong" }));
         return;
       }
       if (msg.type === "join") {
@@ -924,7 +920,9 @@ wss.on("connection", (ws) => {
         room.clients.set(client.id, client);
         client.room = room;
         room.assignPlayer(client);
-        ws.send(JSON.stringify({ type: "joined", clientId: client.id, shipId: client.shipId, team: client.team, roomId: room.id }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "joined", clientId: client.id, shipId: client.shipId, team: client.team, roomId: room.id }));
+        }
         return;
       }
       if (client.room) client.room.handleAction(client, msg);
@@ -943,16 +941,14 @@ wss.on("connection", (ws) => {
   });
 });
 
-// Kapcsolattartó ping (30 mp) — elkerüli az üresjáratú bontást
-const hb = setInterval(() => {
+setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
     ws.isAlive = false;
-    ws.ping();
+    try { ws.ping(); } catch (_) {}
   });
 }, 30000);
 
-// 50 Hz szimuláció + 20 Hz állapotküldés
 let lastTick = Date.now();
 setInterval(() => {
   const now = Date.now();
@@ -973,9 +969,7 @@ setInterval(() => {
 setInterval(() => {
   for (const [, room] of rooms) {
     if (room.clients.size === 0) continue;
-    room.snapN = (room.snapN || 0) + 1;
-    const snap = room.snapshot(room.snapN % 30 === 1);
-    const payload = JSON.stringify({ type: "state", state: snap }, (k, v) => (typeof v === "number" && !Number.isInteger(v)) ? Math.round(v * 100) / 100 : v);
+    const payload = JSON.stringify({ type: "state", state: room.snapshot() });
     for (const [, c] of room.clients) {
       if (c.ws.readyState === WebSocket.OPEN) {
         try { c.ws.send(payload); } catch (_) {}
