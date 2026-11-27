@@ -49,7 +49,7 @@ BASE_UPGRADE_DEFS.forEach(u => {
   const btn = document.createElement("button"); btn.textContent = "Fejleszt";
   btn.onclick = () => {
     const st = window.state, p = getPlayerRef();
-    buyBaseUpgrade(u.key, st ? st.bases[p ? p.team : "blue"] : null, p);
+    buyBaseUpgrade(u.key, st && st.bases ? st.bases[p ? p.team : "blue"] : null, p);
   };
   baseUpgBtns[u.key] = btn; row.append(info, btn); upgListBaseEl.appendChild(row);
 });
@@ -140,7 +140,9 @@ function drawHistoryChart(cv) {
 }
 
 function drawReportCharts() {
-  const hist = window.state.history || [];
+  const st = window.state;
+  if (!st || !st.bases || !st.bases.blue || !st.bases.red) return;
+  const hist = st.history || [];
   if (chartScoreCtx && chartScoreCanvas) {
     const w = chartScoreCanvas.width, h = chartScoreCanvas.height;
     chartScoreCtx.clearRect(0, 0, w, h);
@@ -161,11 +163,12 @@ function drawReportCharts() {
     const w = chartBasesCanvas.width, h = chartBasesCanvas.height;
     chartBasesCtx.clearRect(0, 0, w, h);
     const bC = computeTeamCompositeScore("blue"), rC = computeTeamCompositeScore("red");
+    const tk = st.teamKills || { blue: 0, red: 0 };
     const bars = [
       { label: "Kék Bázis %", val: bC.basePct, max: 100, color: "#339af0" },
       { label: "Piros Bázis %", val: rC.basePct, max: 100, color: "#fa5252" },
-      { label: "Kék Legyőzés", val: window.state.teamKills.blue, max: Math.max(5, window.state.teamKills.blue + window.state.teamKills.red), color: "#74c0fc" },
-      { label: "Piros Legyőzés", val: window.state.teamKills.red, max: Math.max(5, window.state.teamKills.blue + window.state.teamKills.red), color: "#ffa8a8" }
+      { label: "Kék Legyőzés", val: tk.blue || 0, max: Math.max(5, (tk.blue || 0) + (tk.red || 0)), color: "#74c0fc" },
+      { label: "Piros Legyőzés", val: tk.red || 0, max: Math.max(5, (tk.blue || 0) + (tk.red || 0)), color: "#ffa8a8" }
     ];
     const barW = 58, gap = 26, startX = 28, baseY = h - 26, maxBarH = h - 52;
     bars.forEach((b, i) => {
@@ -180,7 +183,7 @@ function drawReportCharts() {
 
 function syncHUD() {
   const st = window.state, p = getPlayerRef();
-  if (!st || !p) return;
+  if (!st || !p || !st.bases || !st.bases.blue || !st.bases.red) return;
   const clsName = (SHIP_CLASSES[p.shipClass] || SHIP_CLASSES.fighter).name;
   refreshAbilUI(p);
   document.getElementById("hud-ship-title").textContent = `${p.id} (${p.team === "blue" ? "KÉK" : "PIROS"} — ${clsName})`;
@@ -202,10 +205,11 @@ function syncHUD() {
   document.getElementById("v-thr").textContent = Math.round((p.throttle || 1) * 100) + "%";
   document.getElementById("v-my-kills").textContent = p.kills || 0;
   document.getElementById("v-my-deaths").textContent = p.deaths || 0;
-  document.getElementById("v-bkills").textContent = st.teamKills.blue || 0;
-  document.getElementById("v-rkills").textContent = st.teamKills.red || 0;
-  document.getElementById("v-bdeaths").textContent = st.teamDeaths.blue || 0;
-  document.getElementById("v-rdeaths").textContent = st.teamDeaths.red || 0;
+  const tk = st.teamKills || { blue: 0, red: 0 }, td = st.teamDeaths || { blue: 0, red: 0 };
+  document.getElementById("v-bkills").textContent = tk.blue || 0;
+  document.getElementById("v-rkills").textContent = tk.red || 0;
+  document.getElementById("v-bdeaths").textContent = td.blue || 0;
+  document.getElementById("v-rdeaths").textContent = td.red || 0;
 
   document.getElementById("timer-box").textContent = `Idő: ${fmtClock(st.matchTime)} / ${fmtClock(st.targetDuration)} (Max ${fmtClock(MAX_MATCH_DURATION)})`;
   document.getElementById("judge-box").textContent = st.judgeNote;
@@ -216,7 +220,7 @@ function syncHUD() {
   document.getElementById("btn-w2-seeker").classList.toggle("active-w2", p.w2Type === "seeker");
   document.getElementById("btn-w2-beam").classList.toggle("active-w2", p.w2Type === "beam");
 
-  const myTeam = p.team || "blue", ownB = st.bases[myTeam], bb = st.bases.blue, rb = st.bases.red;
+  const myTeam = p.team || "blue", ownB = st.bases[myTeam] || st.bases.blue, bb = st.bases.blue, rb = st.bases.red;
   document.getElementById("mb-hp").style.width = pct(p.hp, p.maxHp); document.getElementById("mb-ar").style.width = pct(p.armor, p.maxArmor);
   document.getElementById("mb-fu").style.width = pct(p.fuel, p.maxFuel); document.getElementById("mb-en").style.width = pct(p.energy, p.maxEnergy);
   document.getElementById("mb-ca").style.width = pct(p.cargo, p.maxCargo); document.getElementById("mb-bbase").style.width = pct(bb.hp, bb.maxHp); document.getElementById("mb-rbase").style.width = pct(rb.hp, rb.maxHp);
@@ -230,8 +234,8 @@ function syncHUD() {
   }
 
   document.getElementById("v-bases").textContent = `Kék Bázis: ${Math.ceil((bb.hp / bb.maxHp) * 100)}% | Piros Bázis: ${Math.ceil((rb.hp / rb.maxHp) * 100)}%`;
-  document.getElementById("v-turrets").textContent = `Tornyok: Kék ${st.turrets.filter(t => t.owner === "blue").length} - ${st.turrets.filter(t => t.owner === "red").length} Piros`;
-  const droneCnt = st.drones.filter(d => d.team === myTeam).length;
+  document.getElementById("v-turrets").textContent = `Tornyok: Kék ${(st.turrets || []).filter(t => t.owner === "blue").length} - ${(st.turrets || []).filter(t => t.owner === "red").length} Piros`;
+  const droneCnt = (st.drones || []).filter(d => d.team === myTeam).length;
   document.getElementById("base-status-pill").textContent = `${ownB.name} — Anyag: ${Math.floor(ownB.materials)}/${ownB.maxStorage} | Építőanyag: ${Math.floor(ownB.buildMaterials)} | Üzemanyag: ${Math.floor(ownB.fuel)}/${ownB.maxFuel} | Energia: ${Math.floor(ownB.energy)}/${ownB.maxEnergy} | Drónok: ${droneCnt}/5`;
 
   const alertBox = document.getElementById("alert-box"), alerts = [];
@@ -256,15 +260,15 @@ function syncHUD() {
 
 function renderMinimapBase(targetCanvas, targetCtx) {
   const st = window.state;
-  if (!targetCanvas || !targetCtx || !st) return;
+  if (!targetCanvas || !targetCtx || !st || !st.star || !st.bases || !st.bases.blue || !st.bases.red) return;
   targetCtx.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
   const scale = targetCanvas.width / WORLD_SIZE, toMm = v => (v + HALF) * scale, me = getPlayerRef();
   targetCtx.fillStyle = st.star.color; targetCtx.beginPath(); targetCtx.arc(toMm(st.star.x), toMm(st.star.y), 3.5, 0, Math.PI * 2); targetCtx.fill();
   for (const key of ["blue", "red"]) { const b = st.bases[key]; targetCtx.fillStyle = key === "blue" ? "#4dabf7" : "#ff6b6b"; targetCtx.fillRect(toMm(b.x) - 3.5, toMm(b.y) - 3.5, 7, 7); }
-  for (const t of st.turrets) { targetCtx.fillStyle = t.owner === "blue" ? "#74c0fc" : (t.owner === "red" ? "#ffa8a8" : "#adb5bd"); targetCtx.beginPath(); targetCtx.arc(toMm(t.x), toMm(t.y), 2.5, 0, Math.PI * 2); targetCtx.fill(); }
+  for (const t of (st.turrets || [])) { targetCtx.fillStyle = t.owner === "blue" ? "#74c0fc" : (t.owner === "red" ? "#ffa8a8" : "#adb5bd"); targetCtx.beginPath(); targetCtx.arc(toMm(t.x), toMm(t.y), 2.5, 0, Math.PI * 2); targetCtx.fill(); }
   if (st.kraken) { targetCtx.fillStyle = "#da77f2"; targetCtx.beginPath(); targetCtx.arc(toMm(st.kraken.x), toMm(st.kraken.y), 4.5, 0, Math.PI * 2); targetCtx.fill(); }
-  for (const dr of st.drones) { targetCtx.fillStyle = dr.team === "blue" ? "#a5d8ff" : "#ffc9c9"; targetCtx.fillRect(toMm(dr.x) - 1, toMm(dr.y) - 1, 2, 2); }
-  for (const s of st.ships) {
+  for (const dr of (st.drones || [])) { targetCtx.fillStyle = dr.team === "blue" ? "#a5d8ff" : "#ffc9c9"; targetCtx.fillRect(toMm(dr.x) - 1, toMm(dr.y) - 1, 2, 2); }
+  for (const s of (st.ships || [])) {
     if (s.respawnTimer > 0) continue;
     targetCtx.fillStyle = (me && s.id === me.id) ? "#ffffff" : (s.team === "blue" ? "#339af0" : "#fa5252");
     targetCtx.fillRect(toMm(s.x) - 2, toMm(s.y) - 2, 4, 4);
@@ -293,7 +297,8 @@ function draw() {
   ctx.fillStyle = bgColor; ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   const player = getPlayerRef();
-  if (!st || !player) return;
+  if (!st || !player || !st.star || !st.bases || !st.bases.blue || !st.bases.red) return;
+  if (typeof player.x !== "number" || typeof player.y !== "number") return;
 
   const camX = player.x - canvas.width / 2, camY = player.y - canvas.height / 2;
   ctx.save(); ctx.translate(-camX, -camY);
