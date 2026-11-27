@@ -439,6 +439,50 @@ function damageShip(ship, amount, attackerShip = null) {
   playExplosionSoundAt(ship.x, ship.y, true);
 }
 
+function applyDynamicCollisions(st, activeShips) {
+  for (let i = 0; i < activeShips.length; i++) {
+    const a = activeShips[i];
+    for (let j = i + 1; j < activeShips.length; j++) {
+      const b = activeShips[j];
+      const imp = resolveCircleCollision(a, b, 0.7);
+      if (imp && imp > 55) {
+        damageShip(a, imp * 0.14, b);
+        damageShip(b, imp * 0.14, a);
+      }
+    }
+    for (const tk of ["blue", "red"]) {
+      const b = st.bases[tk];
+      if (!b) continue;
+      const imp = resolveCircleCollision(a, { ...b, immovable: true, vx: 0, vy: 0 }, 0.55);
+      if (imp && imp > 85) damageShip(a, imp * 0.1, null);
+    }
+    for (const pl of st.planets || []) {
+      const imp = resolveCircleCollision(a, { ...pl, immovable: true, mass: 999, vx: 0, vy: 0 }, 0.5);
+      if (imp && imp > 90) damageShip(a, imp * 0.12, null);
+    }
+    for (const t of st.turrets || []) {
+      const imp = resolveCircleCollision(a, { ...t, immovable: true, mass: 200, vx: 0, vy: 0 }, 0.6);
+      if (imp && imp > 85) damageShip(a, imp * 0.08, null);
+    }
+    for (const n of st.nodes || []) {
+      if (n.respawnTimer > 0) continue;
+      const imp = resolveCircleCollision(a, { ...n, mass: n.mass || (n.radius * 0.25) }, 0.65);
+      if (imp && imp > 70) {
+        damageShip(a, imp * 0.08, null);
+        damageNode(n, imp * 0.18, a);
+      }
+    }
+    if (st.kraken) {
+      const imp = resolveCircleCollision(a, st.kraken, 0.65);
+      if (imp && imp > 55) damageShip(a, imp * 0.14, null);
+    }
+    if (st.star && Math.hypot(a.x - st.star.x, a.y - st.star.y) < st.star.radius + a.radius) {
+      damageShip(a, 180 * 0.05, null);
+      resolveCircleCollision(a, { ...st.star, immovable: true, mass: 9999, vx: 0, vy: 0 }, 0.7);
+    }
+  }
+}
+
 function updateOffline(dt) {
   const st = window.state;
   if (!st || st.gameOver || menuOpen) return;
@@ -644,11 +688,10 @@ function updateOffline(dt) {
   }
 
   const activeShips = st.ships.filter(s => s.respawnTimer <= 0);
-  for (let i = 0; i < activeShips.length; i++) {
-    for (let j = i + 1; j < activeShips.length; j++) {
-      const imp = resolveCircleCollision(activeShips[i], activeShips[j], 0.7);
-      if (imp && imp > 55) { damageShip(activeShips[i], imp * 0.14, activeShips[j]); damageShip(activeShips[j], imp * 0.14, activeShips[i]); }
-    }
+  applyDynamicCollisions(st, activeShips);
+  for (const s of activeShips) {
+    s.x = clamp(s.x, -HALF + 30, HALF - 30);
+    s.y = clamp(s.y, -HALF + 30, HALF - 30);
   }
 
   for (const t of st.turrets) {
@@ -719,6 +762,12 @@ function updateOnlineVisuals(dt) {
       s.x += (s.targetX - s.x) * blend;
       s.y += (s.targetY - s.y) * blend;
     }
+  }
+  const activeShips = st.ships.filter(s => s.respawnTimer <= 0);
+  applyDynamicCollisions(st, activeShips);
+  for (const s of activeShips) {
+    s.x = clamp(s.x, -HALF + 30, HALF - 30);
+    s.y = clamp(s.y, -HALF + 30, HALF - 30);
   }
   for (let i = st.beams.length - 1; i >= 0; i--) { st.beams[i].life -= dt; if (st.beams[i].life <= 0) st.beams.splice(i, 1); }
   for (let i = st.particles.length - 1; i >= 0; i--) {
