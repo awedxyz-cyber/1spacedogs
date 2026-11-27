@@ -27,7 +27,8 @@ function sendNetAction(payload) {
 }
 
 function applyServerEvents(events) {
-  if (!Array.isArray(events)) return;
+  if (!Array.isArray(events) || !window.state) return;
+  const st = window.state;
   for (const ev of events) {
     if (!ev || typeof ev !== "object") continue;
     if (ev.kind === "boom") {
@@ -36,6 +37,30 @@ function applyServerEvents(events) {
     } else if (ev.kind === "fx") {
       spawnParticles(ev.x, ev.y, ev.color || "#7cc4ff", ev.count || 12, true);
       playToneAt(ev.x, ev.y, 420, 780, 0.16, "triangle", 0.04, true);
+    } else if (ev.kind === "shot1") {
+      playToneAt(ev.x, ev.y, 680, 260, 0.07, "square", 0.025);
+    } else if (ev.kind === "shot2") {
+      if (ev.w2Type === "seeker") playToneAt(ev.x, ev.y, 320, 520, 0.14, "sawtooth", 0.035);
+      else if (ev.w2Type === "beam") {
+        playToneAt(ev.x, ev.y, 920, 210, 0.22, "sawtooth", 0.045);
+        if (st.beams && st.beams.length < 180 && typeof ev.x2 === "number" && typeof ev.y2 === "number") {
+          st.beams.push({ x1: ev.x, y1: ev.y, x2: ev.x2, y2: ev.y2, color: ev.color || "#66d9e8", life: 0.16, width: 6 });
+        }
+      } else playToneAt(ev.x, ev.y, 380, 140, 0.14, "sawtooth", 0.035);
+    } else if (ev.kind === "hit") {
+      spawnParticles(ev.x, ev.y, ev.color || "#ffd43b", ev.count || 6, false);
+      playToneAt(ev.x, ev.y, 520, 220, 0.06, "triangle", 0.02);
+    } else if (ev.kind === "abil") {
+      if (ev.abil === "cloak") playToneAt(ev.x, ev.y, 900, 160, 0.4, "sine", 0.06, true);
+      else if (ev.abil === "portal") playToneAt(ev.x, ev.y, 200, 1200, 0.3, "sawtooth", 0.05, true);
+      else if (ev.abil === "shield") playToneAt(ev.x, ev.y, 300, 800, 0.3, "triangle", 0.06, true);
+      else if (ev.abil === "dmg") playToneAt(ev.x, ev.y, 140, 500, 0.3, "sawtooth", 0.06, true);
+      else if (ev.abil === "help") {
+        [0, 170, 340].forEach((d, i) => setTimeout(() => playToneAt(ev.x, ev.y, 700 + i * 160, 950 + i * 160, 0.14, "square", 0.05, true, 4000), d));
+      } else playToneAt(ev.x, ev.y, 440, 760, 0.2, "triangle", 0.04, true);
+    } else if (ev.kind === "collide") {
+      spawnParticles(ev.x, ev.y, ev.color || "#ced4da", 8, false);
+      playToneAt(ev.x, ev.y, 190, 85, 0.11, "triangle", 0.035, true);
     }
   }
 }
@@ -57,11 +82,12 @@ function applyServerState(snap) {
 
   const ships = snap.ships.map(s => {
     const old = prevMap.get(s.id);
+    const jumpDist = old && typeof old.x === "number" ? Math.hypot(s.x - old.x, s.y - old.y) : 0;
     return {
       ...s,
       isPlayer: s.id === (prev.myShipId || s.id),
-      x: old && typeof old.x === "number" ? old.x : s.x,
-      y: old && typeof old.y === "number" ? old.y : s.y,
+      x: old && typeof old.x === "number" && jumpDist < 320 ? old.x : s.x,
+      y: old && typeof old.y === "number" && jumpDist < 320 ? old.y : s.y,
       targetX: s.x,
       targetY: s.y
     };
@@ -178,7 +204,7 @@ function connectOnline() {
 
 function sendPlayerInputFrame(nowMs) {
   if (gameMode !== "online" || !ws || ws.readyState !== WebSocket.OPEN) return;
-  if (nowMs - lastInputSend < 50) return;
+  if (nowMs - lastInputSend < 33) return;
   lastInputSend = nowMs;
   const st = window.state, p = getPlayerRef();
   if (!st || !p || st.gameOver) return;
