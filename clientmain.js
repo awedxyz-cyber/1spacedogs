@@ -6,6 +6,7 @@ const mouse = {
   downLeft: false,
   downRight: false
 };
+let lastThrottleSent = 0;
 
 window.addEventListener("keydown", e => {
   keys[e.code] = true;
@@ -52,7 +53,11 @@ if (typeof canvas !== "undefined" && canvas) {
     const p = getPlayerRef();
     if (!p) return;
     p.throttle = clamp((p.throttle || 1) + (e.deltaY < 0 ? 0.1 : -0.1), 0.2, 1.0);
-    if (gameMode === "online") sendNetAction({ type: "input", input: { throttle: p.throttle } });
+    const now = performance.now();
+    if (gameMode === "online" && now - lastThrottleSent > 80) {
+      lastThrottleSent = now;
+      sendNetAction({ type: "input", input: { throttle: p.throttle } });
+    }
   }, { passive: false });
 }
 
